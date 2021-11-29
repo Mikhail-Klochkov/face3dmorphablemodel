@@ -4,7 +4,9 @@ import numpy as np
 from pathlib import Path
 import logging
 
-from face3d.my_folder.morphable_model.utils import MorphableModelFullHead, MeshVisualizer, ImageExtractor
+from face3d.my_folder.morphable_model.morphable_model_full_head import MorphableModelFullHead
+from face3d.my_folder.morphable_model.mesh_visualizer import MeshVisualizer
+from face3d.my_folder.morphable_model.image_extractor import ImageExtractor
 from face3d.my_folder.morphable_model.transformed3d import Transformed3d
 from face3d.my_folder.morphable_model.full_head_model import FullHeadModel
 
@@ -64,4 +66,4 @@ class Test3DMorphableModel():
 
 
 if __name__ == '__main__':
-    Test3DMorphableModel.extract_json_structure_basel_model(angle_z=10, angle_y=10)
+    Test3DMorphableModel.projected_mean_face_on_image_plane(angle_z=10, angle_y=10)
