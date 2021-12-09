@@ -44,12 +44,16 @@ class Transformed3d():
 
 
     @staticmethod
-    def get_projection(vectors_camera_coor, focal_lenght, principle_point = (0, 0), scaling_factor=1):
+    def get_projection(vectors_camera_coor, focal_lenght, principle_point = (0, 0), scaling_factor=1,
+                       return_z_coor=True):
         o_x, o_y = principle_point
         # principle point can be (h/2, w/2)
-        K_intristic = np.array([[focal_lenght, 0, o_x],
-                               [0, focal_lenght, o_y]], dtype=np.float32)
+        K_intristic = np.array([[focal_lenght, 0, o_x], [0, focal_lenght, o_y]], dtype=np.float32)
         # vector points
         if vectors_camera_coor.shape[0] != K_intristic.shape[1]:
             vectors_camera_coor = vectors_camera_coor.T
-        return (scaling_factor * np.dot(K_intristic, vectors_camera_coor)).T
+        if return_z_coor:
+            z_coors = vectors_camera_coor[2:, :].flatten()
+            return (scaling_factor * np.dot(K_intristic, vectors_camera_coor)).T, z_coors
+        else:
+            return (scaling_factor * np.dot(K_intristic, vectors_camera_coor)).T, None

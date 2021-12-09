@@ -10,11 +10,12 @@ class ImageExtractor():
 
     @staticmethod
     def extract_image_another(image_points, rgb_points, height_num_pixels=256, return_uint_image=True,
-                              visible_idx_pts=None, fill_pixels=True):
+                              visible_idx_pts=None, fill_pixels=True, z_coors=None):
         if not (isinstance(image_points, np.ndarray) and image_points.shape[1] == 2):
             raise ValueError(f'Shape: {image_points.shape}')
         h = height_num_pixels
         pt_max, pt_min = image_points.max(axis=0), image_points.min(axis=0)
+        # check image_points
         y_max, x_max = pt_max
         y_min, x_min = pt_min
         delta_x = x_max - x_min
@@ -26,13 +27,31 @@ class ImageExtractor():
         x_range = np.linspace(x_min - delta_x * 0.2, x_max + delta_x * 0.2, w + 1)
         y_range = np.linspace(y_min - delta_y * 0.2, y_max + delta_y * 0.2, h + 1)
         # steps of grid
-        square_to_points_structure, found_squared_pixs = ImageExtractor._get_square_points_correspondence(image_points,
-                                                                                                        rgb_points,
-                                                                                                        x_range,
-                                                                                                        y_range,
-                                                                                                        bin_mask=False)
-        points_plot = []
-        colors_plot = []
+        square_to_points_structure, found_squared_pixs = ImageExtractor._get_square_points_correspondence(
+                                                                        image_points, rgb_points, x_range, y_range,
+                                                                        z_coors, bin_mask=False)
+        # with z_coor
+        if isinstance(z_coors, np.ndarray):
+            for key_square, point in square_to_points_structure.items():
+                if visible_idx_pts:
+                    if point.idx_pt in visible_idx_pts:
+                        idx_y, idx_x = [int(coor) for coor in key_square.split('_')]
+                        color_square_region = point.color
+                        image[idx_y, idx_x] = color_square_region
+            #cv.imshow('win', image[::-1])
+            #cv.waitKey(0)
+        else:
+            ImageExtractor._fill_image_plane_several_pts(image, square_to_points_structure, visible_idx_pts, z_coors)
+        # after all
+        if fill_pixels:
+            image = ImageExtractor._filled_white_pixels(image)
+        if return_uint_image:
+            return np.clip(image * 255, a_min=0, a_max=255).astype(np.uint8)[::-1], square_to_points_structure
+        return np.clip(image, a_min=0, a_max=1.), square_to_points_structure
+
+
+    @staticmethod
+    def _fill_image_plane_several_pts(image, square_to_points_structure, visible_idx_pts, z_coors):
         for key_square, list_points in square_to_points_structure.items():
             # we need ignore not visible points
             # find by hash?
@@ -41,25 +60,10 @@ class ImageExtractor():
             if list_points:
                 # pixel position
                 idx_y, idx_x = [int(coor) for coor in key_square.split('_')]
-                color_square_reqion = Point2d.get_color(list_points, strategy='mean')
-                print(color_square_reqion)
+                color_square_reqion = Point2d.get_color(list_points, z_coors, strategy='mean')
                 image[idx_y, idx_x] = color_square_reqion
-                list_coors = Point2d.get_list_coors(list_points)
-                list_colors = Point2d.get_list_coors(list_points)
-                colors_plot += list_colors
-                points_plot += list_coors
-            else:
-                # TODO: not implemented
-                pass
-
-        # after all
-        if fill_pixels:
-            image = ImageExtractor._filled_white_pixels(image)
-
-        if return_uint_image:
-            return np.clip(image * 255, a_min=0, a_max=255).astype(np.uint8)[::-1]
-
-        return np.clip(image, a_min=0, a_max=1.)
+        #cv.imshow('win', image[::-1])
+        #cv.waitKey(0)
 
 
     @staticmethod
@@ -69,7 +73,7 @@ class ImageExtractor():
             indeces_x = np.where(np.any(image[idx_y, :, :] != [1., 1., 1.], axis=1))[0]
             if len(indeces_x) >= 2:
                 min_idx_x, max_idx_x = np.min(indeces_x), np.max(indeces_x)
-                for idx_x in range(min_idx_x, max_idx_x + 1):
+                for idx_x in range(min_idx_x, max_idx_x+1):
                     # fill white colors
                     if np.all(image[idx_y, idx_x] == [1,1,1]):
                         window = ImageExtractor.filled_squared_window
@@ -95,13 +99,15 @@ class ImageExtractor():
 
 
     @staticmethod
-    def _get_square_points_correspondence(points_2d, colors_2d, x_range, y_range, bin_mask=False):
+    def _get_square_points_correspondence(points_2d, colors_2d, x_range, y_range, z_coors=None, bin_mask=False):
         # left_upper point of squared positions (x_0, y_0) : []
         if points_2d.shape[0] != colors_2d.shape[0]:
             raise ValueError
 
         square_to_points = {}
         found_square_corr = []
+        if isinstance(z_coors, np.ndarray):
+            logging.info(f'Write z coors(depth)!')
         for idx, (pt, color) in enumerate(zip(points_2d, colors_2d)):
             x, y = pt
             right_side_x = np.searchsorted(x_range, x, side='right')
@@ -114,7 +120,11 @@ class ImageExtractor():
             # contains in some squared
             square = (right_side_y-1, right_side_x-1)
             # write idx of point also
-            point = Point2d(x, y, *color, idx)
+            if isinstance(z_coors, np.ndarray):
+                point = Point2d(x, y, *color, z_coors[idx], idx)
+            else:
+                point = Point2d(x, y, *color, idx_pt=idx)
+
             key_square = f'{square[0]}_{square[1]}'
             if key_square in square_to_points:
                 square_to_points[key_square].append(point)
@@ -127,6 +137,23 @@ class ImageExtractor():
                 pass
         if bin_mask:
             ImageExtractor._visualize_bin_mask_points(found_square_corr, x_range, y_range)
+        # TODO: extract closest point to camera
+        if isinstance(z_coors, np.ndarray):
+            square_to_points_filtered_by_depth = {}
+            for key, list_Points in square_to_points.items():
+                # several points need sort it
+                if len(list_Points) > 1:
+                    # get max depth point
+                    _, closest_point = sorted([(p._depth, p) for p in list_Points])[-1]
+                    square_to_points_filtered_by_depth[key] = closest_point
+                # one point
+                else:
+                    closest_point = list_Points[0]
+                # update
+                square_to_points_filtered_by_depth[key] = closest_point
+
+            return square_to_points_filtered_by_depth, found_square_corr
+
         return square_to_points, found_square_corr
 
 
@@ -190,25 +217,37 @@ class ImageExtractor():
 
 class Point2d():
 
-    def __init__(self, x, y, r, g, b, idx_pt=None):
+
+    def __init__(self, x, y, r, g, b, z=None, idx_pt=None):
         self._pt = (x, y)
         self._rgb = (r,g,b)
         self._idx_pt = idx_pt
+        self._depth = z
+
+
+    @property
+    def depth(self):
+        return self._depth
+
 
     @property
     def idx_pt(self):
         return self._idx_pt
 
+
     @property
     def coor(self):
         return self._pt
+
 
     @property
     def color(self):
         return self._rgb
 
+
     def __repr__(self):
         return f'<Point ({self._pt[0]}, {self._pt[1]}) <-> ({self._rgb[0]}, {self._rgb[1]}, {self._rgb[2]})>'
+
 
     @staticmethod
     def get_list_colors(list_Points):
@@ -225,10 +264,22 @@ class Point2d():
             list_coors += [coor for coor in point.coor]
         return list_coors
 
+
+    def get_closest_point_to_camera(self, list_Points):
+        pass
+
+
+    # check correction positions by depth (z_coors) MAX
     @staticmethod
-    def get_color(list_Points, strategy='mean'):
+    def get_color(list_Points, z_coors=None, strategy='mean'):
         if list_Points:
             colors = np.asarray([list(point.color) for point in list_Points])
+            if isinstance(z_coors, np.ndarray):
+                depths = np.asarray([point._depth for point in list_Points])
+                # select only closest point to camera
+                depth_min_idx = np.argmin(depths)
+                depth_max_idx = np.argmax(depths)
+                return colors[depth_max_idx]
             if strategy == 'mean':
                 return colors.mean(axis=0)
             elif strategy == 'max':

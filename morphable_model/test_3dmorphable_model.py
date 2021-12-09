@@ -15,6 +15,8 @@ from face3d.my_folder.morphable_model.transformed3d import Transformed3d
 from face3d.my_folder.morphable_model.full_head_model import FullHeadModel
 from face3d.my_folder.morphable_model.keypoints_extractor import KeyPointsExtractor, FaceDetectorWrapper
 from face3d.my_folder.morphable_model.face_detector_dlib import FaceRecognizerDlib
+from face3d.my_folder.morphable_model.point_correspond import PointCorresponder
+
 
 
 format = '%(asctime)s,%(msecs)03d %(levelname)-4s [%(filename)s:%(lineno)d] %(message)s'
@@ -73,37 +75,47 @@ class Test3DMorphableModel():
 
 
     @staticmethod
-    def projected_mean_face_on_image_plane(angle_x=0, angle_y=0, angle_z=0, focal_lenght=1, visible_points=True,
-                                           visualize=True):
+    def projected_mean_face_on_image_plane(angle_x=0, angle_y=0, angle_z=0, focal_lenght=1, stay_visible_pts=True,
+                                           visualize=True, resize=False, use_z_coors=False):
         morph_model = MorphableModelFullHead(BASEL_FACE_MODEL_FILE_2019)
         mean_shape = morph_model.mean_shape
         mean_color = morph_model.mean_color
         mean_shape_rotate = Transformed3d.rotate3d(mean_shape, angle_x=angle_x, angle_y=angle_y, angle_z=angle_z)
-        if visible_points:
+        if stay_visible_pts:
+            # idx point from mean_shape to idx of visible_point
             visible_idxs = morph_model.get_visible_points(mean_shape_rotate)
         else:
             visible_idxs = None
-
-        projected_points = Transformed3d.get_projection(mean_shape_rotate, focal_lenght=focal_lenght)
-        image_mean = ImageExtractor.extract_image_another(projected_points, rgb_points=mean_color,
-                                                          return_uint_image=False, visible_idx_pts=visible_idxs)
-        image_mean = cv.resize(image_mean, (640, 860))
+        # TODO: need to save also z coordidnate for selection point on image plane
+        projected_points, z_coors = Transformed3d.get_projection(mean_shape_rotate, focal_lenght=focal_lenght,
+                                                        return_z_coor=use_z_coors)
+        if z_coors is None:
+            z_coors = None
+        image_mean, pixel_to_pt = ImageExtractor.extract_image_another(projected_points,
+                                                                       rgb_points=mean_color,
+                                                                       return_uint_image=False,
+                                                                       visible_idx_pts=visible_idxs,
+                                                                       z_coors=z_coors)
+        if resize:
+            image_mean = cv.resize(image_mean, (640, 860))
         image_mean = cv.cvtColor((image_mean * 255).astype(np.uint8), cv.COLOR_RGB2BGR)
         if visualize:
             cv.imshow('result', image_mean[::-1])
             cv.imwrite('/home/mklochkov/projects/data/3dface/mean_face_rotate.jpg', image_mean[::-1])
             cv.waitKey(0)
-
-        return image_mean
+        # get image, 2d points of mean_shape, indeces_which visible
+        return image_mean, projected_points, visible_idxs, pixel_to_pt
 
 
     @staticmethod
-    def extract_keypoints_stats_mean(number_generated_samples=10):
+    def extract_keypoints_stats_mean(number_generated_samples=10, use_z_coors=False, visualization=False):
         # define possible angles (uniform)
+        # atitude of variations of angles (x, y, z)
         angle_b = 5
         keypoints_extractor_new = FaceDetectorWrapper()
         keypoints_extractor_new.prepare(ctx_id=0, det_size=(640, 640))
         dlibfacerecognizer = FaceRecognizerDlib(path_dir_dlib_models)
+        pointcorresponder = PointCorresponder()
         for it in range(number_generated_samples):
             angles = []
             for axis in ['x', 'y', 'z']:
@@ -111,25 +123,43 @@ class Test3DMorphableModel():
             angle_x, angle_y, angle_z = angles
             print(f'generate angles: {angle_x}, {angle_y}, {angle_z}')
             # generate image
-            mean_sample_img = Test3DMorphableModel.projected_mean_face_on_image_plane(angle_x, angle_y, angle_z,
-                                                                                      visualize=False)
+            mean_sample_img, projected_pts, \
+            indeces_visible, pixel_to_pt = Test3DMorphableModel.projected_mean_face_on_image_plane(angle_x,
+                                                            angle_y, angle_z, use_z_coors=use_z_coors, visualize=True)
+            # vertical flip image
             mean_sample_img = mean_sample_img[::-1]
-            scores, boxes, keypoints = keypoints_extractor_new.detect_faces_wrapper(mean_sample_img)
+            scores, boxes, keypoints_small = keypoints_extractor_new.detect_faces_wrapper(mean_sample_img)
             try:
                 box = boxes[0]
             except Exception as e:
-                logging.info(f'Face not found!')
+                logging.info(f'Face not found! Iteration: {it}. Angles: {[angle_x, angle_y, angle_z]}')
                 continue
             face_landmarks = dlibfacerecognizer.get_face_landmarks(mean_sample_img, box)
-            keypoints = [(pt.x, pt.y) for pt in face_landmarks.parts()]
-            mean_sample_img_copy = np.clip(mean_sample_img.astype(np.float32).copy()/255, a_min=0,
-                                           a_max=1.)
-            for pt in keypoints:
-                x, y = pt
-                mean_sample_img_copy = cv.circle(mean_sample_img_copy, (x, y), radius=4, color=(0, 1, 0),
-                                            thickness=-1)
-            cv.imshow('win', mean_sample_img_copy)
-            cv.waitKey(0)
+            keypoints_big = np.asarray([[pt.x, pt.y] for pt in face_landmarks.parts()])
+            # TODO: Need change code (Wrong projected_pts)
+            correspondence_2d_to_3d = pointcorresponder.point_correspond_3d_to_2d(projected_pts, indeces_visible,
+                                                                                  keypoints_big, top_closest=1)
+
+            assert len(correspondence_2d_to_3d) == len(keypoints_big)
+            if visualization:
+                mean_sample_img_copy = np.clip(mean_sample_img.astype(np.float32).copy() / 255, a_min=0, a_max=1.)
+                for pt, (idx_pt, top_idxs) in zip(keypoints_big, correspondence_2d_to_3d.items()):
+                    x, y = pt
+                    mean_sample_img_copy = cv.circle(mean_sample_img_copy, (x, y), radius=5, color=(0, 1, 0),
+                                                     thickness=-1)
+                    for pixel, list_pts in pixel_to_pt.items():
+                        pt_in_pixel = list_pts[0]
+                        y_pixel, x_pixel = pixel.split('_')
+                        # TODO: need to vertically flip image axis Y
+                        x_pixel, y_pixel = int(x_pixel), int(y_pixel)
+                        y_pixel = mean_sample_img_copy.shape[0]-y_pixel
+                        x, y = pt_in_pixel._pt
+                        mean_sample_img_copy = cv.circle(mean_sample_img_copy, (x_pixel, y_pixel), radius=2,
+                                                         color=(1., 0, 0), thickness=-1)
+
+                    cv.imshow('win', mean_sample_img_copy)
+                    cv.waitKey(0)
+                    break
 
 
 def generate_angle_uniform(a, b):
@@ -217,4 +247,4 @@ if __name__ == '__main__':
     #visualize_mean_face_without_region_2017()
     #Test3DMorphableModel.extract_json_structure_basel_model(BASEL_FACE_MODEL_FILE_2017_h5)
     #Test3DMorphableModel.visualize_mean_shape_pcd(BASEL_FACE_MODEL_FILE_2019)
-    Test3DMorphableModel.extract_keypoints_stats_mean()
+    Test3DMorphableModel.extract_keypoints_stats_mean(use_z_coors=True, visualization=True)
