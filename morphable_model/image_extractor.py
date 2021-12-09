@@ -165,9 +165,9 @@ class ImageExtractor():
             idx_y, idx_x = key_square.split('_')
             bin_mask[int(idx_y), int(idx_x)] = [255, 255, 255]
             num_found += 1
-        print(f'Find: {num_found}')
-        cv.imshow('bin_mask', bin_mask[::-1])
-        cv.waitKey(0)
+        #print(f'Find: {num_found}')
+        #cv.imshow('bin_mask', bin_mask[::-1])
+        #cv.waitKey(0)
 
 
     @staticmethod

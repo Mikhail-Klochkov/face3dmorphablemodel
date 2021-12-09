@@ -4,8 +4,11 @@ import open3d
 import numpy as np
 from pathlib import Path
 import logging
-
 import scipy.io
+
+
+from sklearn.metrics import pairwise_distances
+
 
 from face3d.my_folder.morphable_model.mesh_visualizer import WrapperOpen3dType
 from face3d.my_folder.morphable_model.morphable_model_full_head import MorphableModelFullHead
@@ -125,7 +128,8 @@ class Test3DMorphableModel():
             # generate image
             mean_sample_img, projected_pts, \
             indeces_visible, pixel_to_pt = Test3DMorphableModel.projected_mean_face_on_image_plane(angle_x,
-                                                            angle_y, angle_z, use_z_coors=use_z_coors, visualize=True)
+                                                            angle_y, angle_z, use_z_coors=use_z_coors, resize=True,
+                                                                                                   visualize=False)
             # vertical flip image
             mean_sample_img = mean_sample_img[::-1]
             scores, boxes, keypoints_small = keypoints_extractor_new.detect_faces_wrapper(mean_sample_img)
@@ -137,29 +141,27 @@ class Test3DMorphableModel():
             face_landmarks = dlibfacerecognizer.get_face_landmarks(mean_sample_img, box)
             keypoints_big = np.asarray([[pt.x, pt.y] for pt in face_landmarks.parts()])
             # TODO: Need change code (Wrong projected_pts)
-            correspondence_2d_to_3d = pointcorresponder.point_correspond_3d_to_2d(projected_pts, indeces_visible,
-                                                                                  keypoints_big, top_closest=1)
-
-            assert len(correspondence_2d_to_3d) == len(keypoints_big)
             if visualization:
+                idx_to_pt = {idx: pt for idx, pt in enumerate(pixel_to_pt.values())}
+                idx_to_pixel = {idx: pixel for idx, pixel in enumerate(pixel_to_pt.keys())}
+                projected_pts_arr = np.asarray([list(pt._pt) for pixel, pt in pixel_to_pt.items()])
+                distances = pairwise_distances(keypoints_big, projected_pts_arr, metric='euclidean')
+                closest_idxs = np.argsort(distances, axis=1)[0]
+                closest_pts = [idx_to_pt[idx] for idx in closest_idxs]
+                closest_pixels = [idx_to_pixel[idx] for idx in closest_idxs]
                 mean_sample_img_copy = np.clip(mean_sample_img.astype(np.float32).copy() / 255, a_min=0, a_max=1.)
-                for pt, (idx_pt, top_idxs) in zip(keypoints_big, correspondence_2d_to_3d.items()):
-                    x, y = pt
-                    mean_sample_img_copy = cv.circle(mean_sample_img_copy, (x, y), radius=5, color=(0, 1, 0),
+                for key_pt, closest_pixel in zip(keypoints_big, closest_pixels):
+                    print('here')
+                    x, y = key_pt
+                    mean_sample_img_copy = cv.circle(mean_sample_img_copy, (x, y), radius=4, color=(0, 1, 0),
                                                      thickness=-1)
-                    for pixel, list_pts in pixel_to_pt.items():
-                        pt_in_pixel = list_pts[0]
-                        y_pixel, x_pixel = pixel.split('_')
-                        # TODO: need to vertically flip image axis Y
-                        x_pixel, y_pixel = int(x_pixel), int(y_pixel)
-                        y_pixel = mean_sample_img_copy.shape[0]-y_pixel
-                        x, y = pt_in_pixel._pt
-                        mean_sample_img_copy = cv.circle(mean_sample_img_copy, (x_pixel, y_pixel), radius=2,
-                                                         color=(1., 0, 0), thickness=-1)
+                    y_pixel, x_pixel = closest_pixel.split('_')
+                    y_pixel, x_pixel = int(y_pixel), int(x_pixel)
+                    #mean_sample_img_copy = cv.circle(mean_sample_img_copy, (x_pixel, y_pixel), radius=2, color=(1., 0, 0),
+                    #                                 thickness=-1)
+                cv.imshow('win', mean_sample_img_copy)
+                cv.waitKey(0)
 
-                    cv.imshow('win', mean_sample_img_copy)
-                    cv.waitKey(0)
-                    break
 
 
 def generate_angle_uniform(a, b):
