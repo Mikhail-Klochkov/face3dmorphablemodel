@@ -1,6 +1,8 @@
 from pathlib import Path
 import h5py
 import numpy as np
+import json
+
 from face3d.my_folder.morphable_model.tree_h5_file import TreeH5file
 from face3d.mesh_numpy.vis import plot_mesh
 
@@ -41,7 +43,11 @@ class FullHeadModel(object):
         with h5py.File(self._path_file, 'r') as reader:
             try:
                 if processed_f:
-                    return processed_f(reader[key])
+                    if key.find('landmarks') != -1:
+                        json_data = json.loads(reader[key][0].decode('utf-8'))
+                        return json_data
+                    else:
+                        return processed_f(reader[key])
                 else:
                     assert False, 'processed_f is None!'
             except Exception as e:
@@ -125,6 +131,13 @@ class FullHeadModel(object):
     @property
     def noise_variance_color(self):
         return self._noise_variance(type='color')
+
+    @property
+    def landmarks(self):
+        key = 'metadata/landmarks/json'
+        def _preprocessed_landmarks(landmarks_json):
+            return landmarks_json
+        return self._get_dataset(key, processed_f=_preprocessed_landmarks)
 
 
     def _noise_variance(self, type):

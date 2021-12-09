@@ -30,8 +30,15 @@ class MorphableModelFullHead():
         self.color_repr_cells = full_head_model.color_repr_cells
         self.color_repr_colorspace = full_head_model.color_repr_colorspace
         self.color_repr_points = full_head_model.color_repr_points
+        self.landmarks = full_head_model.landmarks
         # idx_pt to list_triangles [t_1], t_1 = [t_1^1, t_1^2, t_1^3]
         self._idx_vertex_to_idx_triangles = self._get_connected_triangles()
+
+
+    def extract_landmarks_coordinates(self):
+        xyz = [landmark['coordinates'] for landmark in self.landmarks]
+        return np.asarray(xyz)
+
 
     # TODO: Have areas where result some bad (ears, and mounth)
     def get_visible_points(self, verteces, camera_unit_vector=np.array([0,0,-1]), strategy='all'):

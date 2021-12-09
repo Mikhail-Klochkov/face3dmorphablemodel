@@ -9,7 +9,7 @@ class MeshVisualizer():
         self._morphable_head_model = morphable_head_model
 
 
-    def visualize_face(self, vertices, texture, triangles, width=640, height=480):
+    def visualize_face(self, vertices, texture, triangles, width=820, height=640):
         if not isinstance(vertices, np.ndarray) and isinstance(texture, np.ndarray)\
                 and isinstance(triangles, np.ndarray):
             raise ValueError('Not np.ndarrays!')
@@ -20,15 +20,36 @@ class MeshVisualizer():
         open3d.visualization.draw_geometries([face_mesh], width=width, height=height)
 
 
-    def visualize_mean_shape(self, height=480, width=640):
+    def visualize_mean_shape_point_cloud(self, height=820, width=1000):
+        mean_shape_pts = self._morphable_head_model.mean_shape
+        colors_mean_shape = self._morphable_head_model.mean_color
+        pcd = open3d.geometry.PointCloud()
+        pcd.points = open3d.utility.Vector3dVector(mean_shape_pts)
+        pcd.colors = open3d.utility.Vector3dVector(colors_mean_shape)
+        open3d.visualization.draw_geometries([pcd], width=width, height=height)
+
+
+    def visualize_mean_shape(self, height=820, width=1000, add_keypoints=False):
         mean_shape_pts = self._morphable_head_model.mean_shape
         colors_mean_shape = self._morphable_head_model.mean_color
         triangles_shape = self._morphable_head_model.triangles_shape
+        if add_keypoints:
+            add_shape_points = self._morphable_head_model.extract_landmarks_coordinates()
+            add_colors_shape = np.full((add_shape_points.shape[0], 3), [0., 1., 0.])
+            pcd = open3d.geometry.PointCloud()
+            pcd.points = open3d.utility.Vector3dVector(add_shape_points)
+            pcd.colors = open3d.utility.Vector3dVector(add_colors_shape)
+            mean_shape_pts = np.vstack([mean_shape_pts, add_shape_points])
+            colors_mean_shape = np.vstack([colors_mean_shape, add_colors_shape])
+
         face_mesh = open3d.geometry.TriangleMesh()
         face_mesh.vertices = WrapperOpen3dType.get_vector(mean_shape_pts, type='float')
         face_mesh.triangles = WrapperOpen3dType.get_vector(triangles_shape, type='int')
         face_mesh.vertex_colors = WrapperOpen3dType.get_vector(colors_mean_shape, 'float')
-        open3d.visualization.draw_geometries([face_mesh], width=width, height=height)
+        if add_keypoints:
+            open3d.visualization.draw_geometries([face_mesh, pcd], width=width, height=height)
+        else:
+            open3d.visualization.draw_geometries([face_mesh], width=width, height=height)
 
 
     # is not a shape

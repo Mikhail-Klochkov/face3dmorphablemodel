@@ -144,7 +144,7 @@ class ImageExtractor():
 
 
     @staticmethod
-    def extract_image_not_workming(image_points, rgb_points, shape = (256, 256), interpolate_method=None):
+    def extract_image_not_working(image_points, rgb_points, shape = (256, 256), interpolate_method=None):
         # we extract image_points and correspondence rgb-points
         if not (isinstance(image_points, np.ndarray) and image_points.shape[1] == 2):
             raise ValueError(f'Shape: {image_points.shape}')
