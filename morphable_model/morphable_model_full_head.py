@@ -18,6 +18,7 @@ class MorphableModelFullHead():
         self.shape_points = full_head_model.repr_points
 
         self.pca_shape = full_head_model.pca_shape
+        self.pca_expression = full_head_model.pca_expression
         self.pca_color= full_head_model.pca_color
 
         self.noiseVariance_shape = full_head_model.noise_variance_shape
@@ -26,6 +27,7 @@ class MorphableModelFullHead():
 
         self.pca_shape_variance = full_head_model.pca_shape_variance
         self.pca_color_variance = full_head_model.pca_color_variance
+        self.pca_expression_variance = full_head_model.pca_expression_variance
 
         self.color_repr_cells = full_head_model.color_repr_cells
         self.color_repr_colorspace = full_head_model.color_repr_colorspace
@@ -124,22 +126,40 @@ class MorphableModelFullHead():
         return self.triangles_shape
 
 
+    def generate_shape_random_face(self, check_IQR=False):
+        p_neutral, p_expression = self.generate_face_params(type='shape')
+        if check_IQR:
+            assert False, 'check_IQR - not implemented part'
+        shape_random_face = self.mean_shape + (self.pca_shape * p_neutral.reshape((-1, 1, 1))).sum(axis=0) + \
+                            (self.pca_expression * p_expression.reshape((-1,1,1))).sum(axis=0)
+        return shape_random_face
+
+
     def generate_face_params(self, type='shape'):
+
         if type not in ['color', 'shape']:
             raise ValueError
+        # by default it will be with expression parameters
         if type == 'shape':
-            number_dims = self.pca_shape_variance.shape[0]
-            params = np.random.multivariate_normal(mean = np.zeros(number_dims, ),
-                                                   cov = np.diag(self.pca_shape_variance), size=1)[0]
-            return params
+            params_neutral = self.get_gaussian_random_vector(self.pca_shape_variance)
+            params_expression = self.get_gaussian_random_vector(self.pca_expression_variance)
+            return params_neutral, params_expression
+
         elif type == 'color':
-            number_dims = self.pca_color_variance.shape[0]
-            params = np.random.multivariate_normal(mean = np.zeros(number_dims, ),
-                                                   cov=np.diag(self.pca_color_variance), size=1)[0]
-            return params
-        # TODO: add expression parameters (creation)
-        elif type == 'expression':
-            assert False
+            assert False, 'NotImplemented'
+
+
+    def get_gaussian_random_vector(self, covariance, mean=None):
+        number_dims = covariance.shape[0]
+        if len(covariance.shape) == 1:
+            cov_matrix = np.diag(covariance)
+        else:
+            cov_matrix = covariance
+        if mean is None:
+            mean = np.zeros(number_dims, )
+        random_vect = np.random.multivariate_normal(mean, cov=cov_matrix, size=1)[0]
+
+        return random_vect
 
 
     def get_face_vertices_texture(self, shape_params, color_params, expression=False, check_distr=True):

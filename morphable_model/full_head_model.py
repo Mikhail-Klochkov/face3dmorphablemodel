@@ -62,6 +62,15 @@ class FullHeadModel(object):
 
 
     @property
+    def pca_expression(self):
+        key = 'expression/model/pcaBasis'
+        def _processed_pca_expression(pca_shape):
+            return np.asarray(pca_shape, dtype=np.float32).reshape((100, -1, 3))
+
+        return self._get_dataset(key, processed_f=_processed_pca_expression)
+
+
+    @property
     def mean_color(self):
         key = 'color/model/mean'
 
@@ -78,6 +87,15 @@ class FullHeadModel(object):
         def _processed_pca_shape_variance(pca_shape_variance):
             return np.asarray(pca_shape_variance)
         return self._get_dataset(key, processed_f=_processed_pca_shape_variance)
+
+
+    @property
+    def pca_expression_variance(self):
+        key = 'expression/model/pcaVariance'
+
+        def _processed_pca_expression_variance(pca_color_variance):
+            return np.asarray(pca_color_variance)
+        return self._get_dataset(key, processed_f=_processed_pca_expression_variance)
 
 
     @property

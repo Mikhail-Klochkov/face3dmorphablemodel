@@ -5,6 +5,7 @@ import numpy as np
 from pathlib import Path
 import logging
 import scipy.io
+import matplotlib.pyplot as plt
 
 
 from sklearn.metrics import pairwise_distances
@@ -40,6 +41,7 @@ BASEL_FACE_MODEL_FILE_2019_update = Path('/home/mklochkov/projects/data/3dface/m
 
 path_dir_dlib_models = Path('/home/mklochkov/projects/data/models')
 
+
 class Test3DMorphableModel():
 
 
@@ -50,11 +52,20 @@ class Test3DMorphableModel():
         print(root_tree)
 
     @staticmethod
-    def visualize_mean_shape_pcd(path_model=BASEL_FACE_MODEL_FILE_2019):
+    def visualize_mean_shape_pca(path_model=BASEL_FACE_MODEL_FILE_2019):
         morph_model = MorphableModelFullHead(path_model)
         print(morph_model.mean_shape.shape)
         mesh_visualizer = MeshVisualizer(morph_model)
         mesh_visualizer.visualize_mean_shape_point_cloud()
+
+
+    @staticmethod
+    def visualize_random_face(path_model=BASEL_FACE_MODEL_FILE_2019):
+        morph_model = MorphableModelFullHead(path_model)
+        random_shape = morph_model.generate_shape_random_face()
+        pcd = open3d.geometry.PointCloud()
+        pcd.points = open3d.utility.Vector3dVector(random_shape)
+        open3d.visualization.draw_geometries([pcd], width=800, height=1000)
 
 
     @staticmethod
@@ -118,7 +129,6 @@ class Test3DMorphableModel():
         keypoints_extractor_new = FaceDetectorWrapper()
         keypoints_extractor_new.prepare(ctx_id=0, det_size=(640, 640))
         dlibfacerecognizer = FaceRecognizerDlib(path_dir_dlib_models)
-        pointcorresponder = PointCorresponder()
         for it in range(number_generated_samples):
             angles = []
             for axis in ['x', 'y', 'z']:
@@ -127,9 +137,8 @@ class Test3DMorphableModel():
             print(f'generate angles: {angle_x}, {angle_y}, {angle_z}')
             # generate image
             mean_sample_img, projected_pts, \
-            indeces_visible, pixel_to_pt = Test3DMorphableModel.projected_mean_face_on_image_plane(angle_x,
-                                                            angle_y, angle_z, use_z_coors=use_z_coors, resize=True,
-                                                                                                   visualize=False)
+            indeces_visible, pixel_to_pt = Test3DMorphableModel.projected_mean_face_on_image_plane(angle_x, angle_y,
+                                                        angle_z, use_z_coors=use_z_coors, resize=False, visualize=False)
             # vertical flip image
             mean_sample_img = mean_sample_img[::-1]
             scores, boxes, keypoints_small = keypoints_extractor_new.detect_faces_wrapper(mean_sample_img)
@@ -144,24 +153,69 @@ class Test3DMorphableModel():
             if visualization:
                 idx_to_pt = {idx: pt for idx, pt in enumerate(pixel_to_pt.values())}
                 idx_to_pixel = {idx: pixel for idx, pixel in enumerate(pixel_to_pt.keys())}
-                projected_pts_arr = np.asarray([list(pt._pt) for pixel, pt in pixel_to_pt.items()])
-                distances = pairwise_distances(keypoints_big, projected_pts_arr, metric='euclidean')
-                closest_idxs = np.argsort(distances, axis=1)[0]
+                #projected_pts_arr = np.asarray([list(pt._pt) for pixel, pt in pixel_to_pt.items()])
+                projected_pts_arr = np.asarray([get_coor_by_pixel(pixel) for pixel, pt in pixel_to_pt.items()])
+                # need transfrom data (need rotate and shift by some vector)
+                pts_centered, mean_pt = center_data(projected_pts_arr)
+                pts_centered_rot = rotate_pts_angle(pts_centered, angle=90)
+                pts_centered_rot += mean_pt
+                distances = pairwise_distances(keypoints_big, pts_centered_rot, metric='euclidean')
+                #distances = pairwise_distances(keypoints_big, projected_pts_arr, metric='euclidean')
+                closest_idxs = np.argsort(distances, axis=1)[:, 0]
                 closest_pts = [idx_to_pt[idx] for idx in closest_idxs]
-                closest_pixels = [idx_to_pixel[idx] for idx in closest_idxs]
+                closest_pixels = [pts_centered_rot[idx] for idx in closest_idxs]
+                #closest_pixels = [idx_to_pixel[idx] for idx in closest_idxs]
                 mean_sample_img_copy = np.clip(mean_sample_img.astype(np.float32).copy() / 255, a_min=0, a_max=1.)
                 for key_pt, closest_pixel in zip(keypoints_big, closest_pixels):
-                    print('here')
                     x, y = key_pt
-                    mean_sample_img_copy = cv.circle(mean_sample_img_copy, (x, y), radius=4, color=(0, 1, 0),
-                                                     thickness=-1)
-                    y_pixel, x_pixel = closest_pixel.split('_')
+                    mean_sample_img_copy = cv.circle(mean_sample_img_copy, (x, y), radius=2, color=(0, 1, 0), thickness=-1)
+                    y_pixel, x_pixel = closest_pixel
                     y_pixel, x_pixel = int(y_pixel), int(x_pixel)
-                    #mean_sample_img_copy = cv.circle(mean_sample_img_copy, (x_pixel, y_pixel), radius=2, color=(1., 0, 0),
-                    #                                 thickness=-1)
+                    mean_sample_img_copy = cv.circle(mean_sample_img_copy, (y_pixel, x_pixel), radius=1, color=(1, 0, 0),
+                                                     thickness=-1)
+                mean_sample_img_copy = cv.resize(mean_sample_img_copy, (640, 860))
                 cv.imshow('win', mean_sample_img_copy)
                 cv.waitKey(0)
+                mean_shape = MorphableModelFullHead(BASEL_FACE_MODEL_FILE_2019).mean_shape
+                pcd = open3d.geometry.PointCloud()
+                pcd.points = open3d.utility.Vector3dVector(mean_shape)
+                pcd.colors = open3d.utility.Vector3dVector([[1, 0, 0] for _ in range(len(mean_shape))])
+                pcd_landmarks = open3d.geometry.PointCloud()
+                indeces_3d_pts = [pt.idx_pt for pt in closest_pts]
+                landmarks = np.asarray([mean_shape[id] for id in indeces_3d_pts])
+                pcd_landmarks.points = open3d.utility.Vector3dVector(landmarks)
+                pcd_landmarks.voxel_down_sample(voxel_size=3)
+                pcd_landmarks.colors = open3d.utility.Vector3dVector([[0, 1, 0] for _ in range(len(mean_shape))])
+                open3d.visualization.draw_geometries([pcd, pcd_landmarks], width=800, height=1000)
 
+
+def get_rotate_matr(angle=90):
+    rad = np.radians(angle)
+    return np.array([[np.cos(rad), np.sin(rad)], [-np.sin(rad), np.cos(rad)]])
+
+
+def rotate_pts(pts, rot):
+    return np.dot(rot, pts.T).T
+
+
+def center_data(pts, inverse_mean_pt=True, const_shift=15):
+    mean_pt = pts.mean(axis=0)
+    if inverse_mean_pt:
+        mean_inv = mean_pt[::-1]
+        mean_inv[1] -= const_shift
+        return pts - mean_pt, mean_inv
+    else:
+        return pts - mean_pt, mean_pt
+
+
+def rotate_pts_angle(pts, angle=90):
+    return rotate_pts(pts, get_rotate_matr(angle))
+
+
+def get_coor_by_pixel(pixel):
+    y_pixel, x_pixel = pixel.split('_')
+    y_pixel, x_pixel = int(y_pixel), int(x_pixel)
+    return y_pixel, x_pixel
 
 
 def generate_angle_uniform(a, b):
@@ -198,7 +252,6 @@ def _get_current_indeces(indeces_removed, number_verteces):
             Indeces_now += [idx - smallest_idx_r]
     assert number_verteces == len(Indeces_now)
     return Indeces_now
-
 
 
 def _remove_regions_from_mean_face(file_basel_model=BASEL_FACE_MODLE_FILE_2017, file_regions=BASEL_FACE_REGIONS_2017,
@@ -242,6 +295,7 @@ def visualize_mean_face_without_region_2017():
     mean_shape, mean_color, triangles = _remove_regions_from_mean_face(triangles_remove=True)
     _visualize_mean_2017(mean_shape, mean_color, triangles)
 
+
 if __name__ == '__main__':
     #Test3DMorphableModel.projected_mean_face_on_image_plane(angle_z=10, angle_y=3, angle_x=3)
     #Test3DMorphableModel.generate_random_vertices_texture()
@@ -250,3 +304,5 @@ if __name__ == '__main__':
     #Test3DMorphableModel.extract_json_structure_basel_model(BASEL_FACE_MODEL_FILE_2017_h5)
     #Test3DMorphableModel.visualize_mean_shape_pcd(BASEL_FACE_MODEL_FILE_2019)
     Test3DMorphableModel.extract_keypoints_stats_mean(use_z_coors=True, visualization=True)
+    #Test3DMorphableModel.extract_json_structure_basel_model(BASEL_FACE_MODEL_FILE_2019)
+    #Test3DMorphableModel.visualize_random_face()
